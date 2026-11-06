@@ -25,7 +25,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 HOST = os.environ.get("HOST", "0.0.0.0")
-PORT = int(os.environ.get("PORT", "8080"))
+PORT = int(os.environ.get("PORT", "5656"))
 DB_PATH = Path(os.environ.get("DB_PATH", "data/bookmarks.db"))
 PUBLIC_DIR = Path(__file__).resolve().parent / "public"
 AUTH_USER = os.environ.get("AUTH_USER", "")

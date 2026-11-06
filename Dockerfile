@@ -2,7 +2,7 @@ FROM python:3.13-alpine
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PORT=8080 \
+    PORT=5656 \
     DB_PATH=/data/bookmarks.db
 
 WORKDIR /app
@@ -14,7 +14,7 @@ COPY server.py ./
 COPY public ./public
 
 USER app
-EXPOSE 8080
+EXPOSE 5656
 VOLUME ["/data"]
 
 CMD ["python", "server.py"]

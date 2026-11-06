@@ -13,7 +13,7 @@ cp .env.example .env      # opcional: puerto, zona horaria, contraseña
 docker compose up -d --build
 ```
 
-Después abre `http://IP-DEL-MINIPC:8080` en cualquier dispositivo de tu red.
+Después abre `http://IP-DEL-MINIPC:5656` en cualquier dispositivo de tu red.
 
 | Acción | Comando |
 | --- | --- |
@@ -41,5 +41,5 @@ Si en `.env` le das valor a `AUTH_PASSWORD` (y a `AUTH_USER`), el navegador pedi
 ## Desarrollo sin Docker
 
 ```bash
-python3 server.py         # http://localhost:8080, base de datos en ./data/bookmarks.db
+python3 server.py         # http://localhost:5656, base de datos en ./data/bookmarks.db
 ```
