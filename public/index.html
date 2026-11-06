@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bookmarks</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%233b5bdb' d='M6 2h12a1 1 0 0 1 1 1v19l-7-4.5L5 22V3a1 1 0 0 1 1-1z'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <p class="today" id="today"></p>
+      <div class="add-row">
+        <form id="addForm" class="add" autocomplete="off">
+          <svg class="add-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <input id="addInput" type="text" spellcheck="false" autofocus
+                 aria-label="Añadir bookmark"
+                 placeholder="Pega una URL y pulsa Enter — o escribe «Nombre https://…»">
+          <kbd title="Pulsa / para escribir aquí">/</kbd>
+          <button type="submit" class="btn primary">Añadir</button>
+        </form>
+        <button id="newFolderBtn" class="btn" type="button" title="Crear carpeta">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/></svg>
+          <span>Carpeta</span>
+        </button>
+      </div>
+      <p id="addHint" class="hint" role="status" aria-live="polite"></p>
+    </header>
+
+    <nav id="crumbs" class="crumbs" aria-label="Ruta de carpetas"></nav>
+
+    <main id="board" class="board">
+      <div id="grid" class="grid"></div>
+      <div id="empty" class="empty" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h12a1 1 0 0 1 1 1v19l-7-4.5L5 22V3a1 1 0 0 1 1-1z"/></svg>
+        <p>Aquí no hay nada todavía.</p>
+        <p class="muted">Pega una URL arriba, o arrastra un enlace desde otra pestaña hasta aquí.</p>
+      </div>
+    </main>
+
+    <footer class="foot">
+      <span class="muted">Arrastra para reordenar · suelta en el centro de una carpeta para meterlo dentro · arrastra a la ruta para sacarlo</span>
+      <span class="foot-actions">
+        <span id="syncStatus" class="sync" data-status="local" role="status"></span>
+        <label class="toggle"><input type="checkbox" id="newTab"> Abrir en pestaña nueva</label>
+        <button id="exportBtn" class="link-btn" type="button">Exportar</button>
+        <button id="importBtn" class="link-btn" type="button" title="Importa una copia .json o los marcadores exportados de tu navegador (.html)">Importar</button>
+        <input type="file" id="importFile" accept=".json,.html,.htm,application/json,text/html" hidden>
+      </span>
+    </footer>
+  </div>
+
+  <dialog id="editDialog">
+    <form id="editForm" novalidate>
+      <h2 id="editHeading">Editar</h2>
+      <label>Nombre
+        <input id="fTitle" type="text" required>
+      </label>
+      <label id="urlRow">URL
+        <input id="fUrl" type="text" spellcheck="false">
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="cancelEdit">Cancelar</button>
+        <button type="submit" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden>
+    <span id="toastMsg"></span>
+    <button id="toastUndo" type="button">Deshacer</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
