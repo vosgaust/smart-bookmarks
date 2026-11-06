@@ -1,8 +1,8 @@
 'use strict';
 
 /* =========================================================
-   Smart Bookmarks — todo se guarda en localStorage.
-   Modelo:  { items: Item[], settings: { newTab } }
+   Smart Bookmarks
+   Modelo:  { spaces: { personal: Item[], trabajo: Item[] }, settings: { newTab } }
    Item  =  { id, type: 'link',   title, url }
          |  { id, type: 'folder', title, children: Item[] }
    ========================================================= */
@@ -10,6 +10,14 @@
 const STORAGE_KEY = 'smart-bookmarks:v1';
 const DND_TYPE = 'application/x-smart-bookmark';
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:', 'file:', 'ftp:', 'mailto:']);
+
+// Espacios: cada uno tiene sus propios bookmarks. El espacio activo se recuerda por dispositivo.
+const SPACE_KEY = 'smart-bookmarks:space';
+const SPACES = [
+  { id: 'personal', label: 'Personal', icon: '<svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg>' },
+  { id: 'trabajo', label: 'Trabajo', icon: '<svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M3 13h18"/></svg>' },
+];
+const isSpace = (id) => SPACES.some((s) => s.id === id);
 
 const $ = (sel) => document.querySelector(sel);
 const els = {
@@ -37,6 +45,7 @@ const els = {
   toastMsg: $('#toastMsg'),
   toastUndo: $('#toastUndo'),
   syncStatus: $('#syncStatus'),
+  spaces: $('#spaces'),
 };
 
 const ICONS = {
@@ -48,7 +57,8 @@ const ICONS = {
 /* ---------------- State ---------------- */
 
 let state;              // se carga en Init, al final del archivo
-let path = [];          // ids de carpetas desde la raíz hasta la carpeta abierta
+let space = initialSpace();
+let path = [];          // ids de carpetas desde la raíz del espacio hasta la carpeta abierta
 let drag = null;        // { id } mientras se arrastra un bookmark propio
 let dropTarget = null;  // { mode: 'before'|'after'|'into'|'end', id? }
 let editing = null;     // { mode: 'edit', id } | { mode: 'new-folder' }
@@ -78,18 +88,36 @@ function load() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const data = JSON.parse(raw);
-      if (Array.isArray(data.items)) return normalizeState(data);
+      if (data && (data.spaces || Array.isArray(data.items))) return normalizeState(data);
     }
   } catch { /* datos corruptos o storage bloqueado: empezamos de cero */ }
-  return { items: defaults(), settings: { newTab: false } };
+  return normalizeState({ spaces: { personal: defaults() } });
 }
 
+// Acepta el formato con espacios y el antiguo ({ items }), que pasa a "personal".
 function normalizeState(data) {
-  return {
-    items: sanitize(data.items),
-    settings: { newTab: false, ...(data.settings || {}) },
-  };
+  const src = data.spaces && typeof data.spaces === 'object' ? data.spaces : { personal: data.items };
+  const spaces = {};
+  for (const { id } of SPACES) spaces[id] = sanitize(src[id]);
+  for (const [id, items] of Object.entries(src)) {
+    if (!(id in spaces) && /^[a-z0-9_-]{1,32}$/.test(id)) spaces[id] = sanitize(items); // no perder espacios desconocidos
+  }
+  return { spaces, settings: { newTab: false, ...(data.settings || {}) } };
 }
+
+function initialSpace() {
+  const fromHash = decodeURIComponent(location.hash.slice(1));
+  if (isSpace(fromHash)) return fromHash;
+  try {
+    const saved = localStorage.getItem(SPACE_KEY);
+    if (isSpace(saved)) return saved;
+  } catch { /* ignorar */ }
+  return SPACES[0].id;
+}
+
+const rootItems = () => state.spaces[space];
+const spaceLabel = (id) => SPACES.find((s) => s.id === id)?.label || id;
+const countAll = () => Object.values(state.spaces).reduce((n, list) => n + countLinks(list), 0);
 
 // Limpia datos importados: ids, tipos y URLs válidas.
 function sanitize(items) {
@@ -214,7 +242,7 @@ async function push() {
     const res = await fetch(API, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: state.items, settings: state.settings, version: sync.version }),
+      body: JSON.stringify({ spaces: state.spaces, settings: state.settings, version: sync.version }),
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 409 && data.state) {
@@ -275,7 +303,7 @@ async function initSync() {
 
 /* ---------------- Tree helpers ---------------- */
 
-function find(id, list = state.items) {
+function find(id, list = rootItems()) {
   for (let i = 0; i < list.length; i++) {
     const item = list[i];
     if (item.id === id) return { item, list, index: i };
@@ -304,7 +332,7 @@ function countLinks(list) {
 
 // Devuelve la lista de la carpeta abierta y la "miga de pan" de carpetas.
 function currentFolder(depth = path.length) {
-  let list = state.items;
+  let list = rootItems();
   const trail = [];
   for (const id of path.slice(0, depth)) {
     const folder = list.find((x) => x.id === id && x.type === 'folder');
@@ -419,7 +447,9 @@ function render() {
   els.grid.replaceChildren(...list.map(tileFor));
   els.empty.hidden = list.length > 0;
   els.newTab.checked = !!state.settings.newTab;
-  document.title = trail.length ? `${trail[trail.length - 1].title} · Bookmarks` : 'Bookmarks';
+  renderSpaces();
+  const where = trail.length ? trail[trail.length - 1].title : spaceLabel(space);
+  document.title = `${where} · Bookmarks`;
 }
 
 function iconHtml(url, title) {
@@ -521,7 +551,7 @@ els.form.addEventListener('submit', (e) => {
 });
 els.form.addEventListener('animationend', () => els.form.classList.remove('shake'));
 
-function countDuplicates(url, list = state.items) {
+function countDuplicates(url, list = rootItems()) {
   return list.reduce((n, it) => n + (it.type === 'folder' ? countDuplicates(url, it.children) : it.url === url ? 1 : 0), 0);
 }
 
@@ -615,13 +645,14 @@ els.editForm.addEventListener('submit', (e) => {
 /* ---------------- Delete + undo ---------------- */
 
 function removeItem(id) {
-  const snapshot = JSON.stringify(state.items);
+  const snapshotSpace = space;
+  const snapshot = JSON.stringify(rootItems());
   const item = detach(id);
   if (!item) return;
   commit();
   const extra = item.type === 'folder' && item.children.length ? ` y su contenido` : '';
   toast(`«${item.title}»${extra} eliminado`, () => {
-    state.items = JSON.parse(snapshot);
+    state.spaces[snapshotSpace] = JSON.parse(snapshot);
     commit();
   });
 }
@@ -692,7 +723,7 @@ els.grid.addEventListener('dragend', () => {
   clearDrop();
   document.body.classList.remove('dragging');
   els.grid.querySelectorAll('.is-dragging').forEach((t) => t.classList.remove('is-dragging'));
-  els.crumbs.querySelectorAll('.drop-into').forEach((c) => c.classList.remove('drop-into'));
+  document.querySelectorAll('.crumb.drop-into, .spaces .drop-into').forEach((c) => c.classList.remove('drop-into'));
 });
 
 els.board.addEventListener('dragover', (e) => {
@@ -802,6 +833,71 @@ els.crumbs.addEventListener('drop', (e) => {
   flashHint(`«${item.title}» movido a ${c.textContent}`);
 });
 
+/* ---------------- Espacios (personal / trabajo) ---------------- */
+
+function renderSpaces() {
+  document.documentElement.dataset.space = space;
+  if (!els.spaces.children.length) {
+    els.spaces.innerHTML = SPACES.map((s) =>
+      `<button type="button" role="tab" data-space="${s.id}" title="${esc(s.label)} — suelta aquí un bookmark para moverlo a este espacio">${s.icon}<span>${esc(s.label)}</span></button>`
+    ).join('');
+  }
+  for (const b of els.spaces.children) {
+    const active = b.dataset.space === space;
+    b.setAttribute('aria-selected', String(active));
+    b.tabIndex = active ? 0 : -1;
+  }
+}
+
+function switchSpace(id) {
+  if (!isSpace(id) || id === space) return;
+  space = id;
+  path = [];
+  try { localStorage.setItem(SPACE_KEY, id); } catch { /* ignorar */ }
+  history.replaceState(null, '', `#${id}`);
+  render();
+}
+
+els.spaces.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-space]');
+  if (b) switchSpace(b.dataset.space);
+});
+
+// Flechas izquierda/derecha para cambiar de espacio cuando el selector tiene el foco
+els.spaces.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  const i = SPACES.findIndex((s) => s.id === space);
+  const next = SPACES[(i + (e.key === 'ArrowRight' ? 1 : SPACES.length - 1)) % SPACES.length];
+  switchSpace(next.id);
+  els.spaces.querySelector(`[data-space="${next.id}"]`)?.focus();
+});
+
+window.addEventListener('hashchange', () => switchSpace(decodeURIComponent(location.hash.slice(1))));
+
+// Soltar un bookmark sobre el otro espacio lo mueve allí
+els.spaces.addEventListener('dragover', (e) => {
+  const b = e.target.closest('[data-space]');
+  if (!drag || !b || b.dataset.space === space) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  b.classList.add('drop-into');
+});
+els.spaces.addEventListener('dragleave', (e) => {
+  const b = e.target.closest('[data-space]');
+  if (b && !b.contains(e.relatedTarget)) b.classList.remove('drop-into');
+});
+els.spaces.addEventListener('drop', (e) => {
+  const b = e.target.closest('[data-space]');
+  if (!drag || !b || b.dataset.space === space) return;
+  e.preventDefault();
+  b.classList.remove('drop-into');
+  const item = detach(drag.id);
+  if (!item) return;
+  state.spaces[b.dataset.space].push(item);
+  commit();
+  flashHint(`«${item.title}» movido a ${spaceLabel(b.dataset.space)}`);
+});
+
 /* ---------------- Settings, export & import ---------------- */
 
 els.newTab.addEventListener('change', () => {
@@ -832,11 +928,17 @@ els.importFile.addEventListener('change', async () => {
   if (/\.json$/i.test(file.name) || text.trimStart().startsWith('{')) {
     try {
       const data = JSON.parse(text);
-      if (!Array.isArray(data.items)) throw new Error('sin items');
-      state = normalizeState(data);
+      if (data.spaces && typeof data.spaces === 'object') {
+        state = normalizeState(data); // copia completa: todos los espacios
+        toast(`Copia restaurada: ${countAll()} bookmarks`, undo);
+      } else if (Array.isArray(data.items)) {
+        state.spaces[space] = sanitize(data.items); // copia antigua: solo el espacio actual
+        toast(`Copia restaurada en ${spaceLabel(space)}: ${countLinks(rootItems())} bookmarks`, undo);
+      } else {
+        throw new Error('formato desconocido');
+      }
       path = [];
       commit();
-      toast(`Copia restaurada: ${countLinks(state.items)} bookmarks`, undo);
     } catch {
       toast('Ese archivo JSON no es una copia válida de Bookmarks');
     }

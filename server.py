@@ -4,9 +4,9 @@
 Sirve la web de `public/` y una API JSON sobre SQLite:
 
   GET  /api/health                 -> {"ok": true}                (sin autenticación)
-  GET  /api/bookmarks              -> {"items", "settings", "version"}
+  GET  /api/bookmarks              -> {"spaces": {"personal": [...], "trabajo": [...]}, "settings", "version"}
   GET  /api/bookmarks?since=N      -> {"changed": false, ...} si no hay cambios desde la versión N
-  PUT  /api/bookmarks              <- {"items", "settings", "version"}  (version = versión de la que partes)
+  PUT  /api/bookmarks              <- {"spaces", "settings", "version"}  (version = versión de la que partes)
                                    -> 200 {"version": N+1} | 409 {"state": ...} si otro dispositivo guardó antes
 
 Variables de entorno: HOST, PORT, DB_PATH, AUTH_USER, AUTH_PASSWORD.
@@ -16,6 +16,7 @@ import base64
 import hmac
 import json
 import os
+import re
 import signal
 import sqlite3
 import sys
@@ -34,12 +35,16 @@ AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
 MAX_BODY = 5 * 1024 * 1024
 MAX_ITEMS = 20_000
 MAX_DEPTH = 20
+MAX_SPACES = 20
+DEFAULT_SPACE = "personal"
+SPACE_ID = re.compile(r"^[a-z0-9_-]{1,32}$")
 ALLOWED_URL_PREFIXES = ("http://", "https://", "file:", "ftp://", "mailto:")
 STATIC_FILES = {"/", "/index.html", "/app.js", "/styles.css"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
     id         TEXT PRIMARY KEY,
+    space      TEXT NOT NULL DEFAULT 'personal',
     parent_id  TEXT REFERENCES items(id) ON DELETE CASCADE,
     position   INTEGER NOT NULL,
     type       TEXT NOT NULL CHECK (type IN ('link', 'folder')),
@@ -48,7 +53,6 @@ CREATE TABLE IF NOT EXISTS items (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS items_parent ON items (parent_id, position);
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -56,15 +60,17 @@ CREATE TABLE IF NOT EXISTS meta (
 """
 
 UPSERT = """
-INSERT INTO items (id, parent_id, position, type, title, url) VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO items (id, space, parent_id, position, type, title, url) VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (id) DO UPDATE SET
+    space      = excluded.space,
     parent_id  = excluded.parent_id,
     position   = excluded.position,
     type       = excluded.type,
     title      = excluded.title,
     url        = excluded.url,
     updated_at = CASE
-        WHEN items.parent_id IS NOT excluded.parent_id OR items.title IS NOT excluded.title
+        WHEN items.space IS NOT excluded.space
+          OR items.parent_id IS NOT excluded.parent_id OR items.title IS NOT excluded.title
           OR items.url IS NOT excluded.url OR items.type IS NOT excluded.type
         THEN CURRENT_TIMESTAMP ELSE items.updated_at END
 """
@@ -84,6 +90,13 @@ def init_db():
     with closing(connect()) as conn:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
+        # Migración: bases de datos anteriores a los espacios -> todo pasa a "personal"
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(items)")}
+        if "space" not in columns:
+            conn.execute("ALTER TABLE items ADD COLUMN space TEXT NOT NULL DEFAULT 'personal'")
+            print("Base de datos migrada: los bookmarks existentes están en el espacio 'personal'", flush=True)
+        conn.execute("DROP INDEX IF EXISTS items_parent")
+        conn.execute("CREATE INDEX IF NOT EXISTS items_tree ON items (space, parent_id, position)")
 
 
 def get_meta(conn):
@@ -96,7 +109,7 @@ def get_version(conn):
 
 def read_state(conn):
     rows = conn.execute(
-        "SELECT id, parent_id, type, title, url FROM items ORDER BY position"
+        "SELECT id, space, parent_id, type, title, url FROM items ORDER BY position"
     ).fetchall()
     nodes = {}
     for r in rows:
@@ -107,25 +120,40 @@ def read_state(conn):
             node["children"] = []
         nodes[r["id"]] = node
 
-    roots = []
+    spaces = {DEFAULT_SPACE: []}
     for r in rows:  # ordenadas por posición: el orden relativo dentro de cada carpeta se mantiene
         parent = nodes.get(r["parent_id"]) if r["parent_id"] else None
-        (parent["children"] if parent else roots).append(nodes[r["id"]])
+        siblings = parent["children"] if parent else spaces.setdefault(r["space"], [])
+        siblings.append(nodes[r["id"]])
 
     meta = get_meta(conn)
     return {
-        "items": roots,
+        "spaces": spaces,
+        "items": spaces[DEFAULT_SPACE],  # para pestañas abiertas con la versión anterior de la página
         "settings": json.loads(meta.get("settings", "{}")),
         "version": int(meta.get("version", "0")),
     }
 
 
-def flatten(items, parent=None, depth=0, out=None, seen=None):
+def flatten_spaces(spaces):
+    if not isinstance(spaces, dict):
+        raise ValueError("'spaces' debe ser un objeto")
+    if len(spaces) > MAX_SPACES:
+        raise ValueError("demasiados espacios")
+    rows, seen = [], set()
+    for space, items in spaces.items():
+        if not isinstance(space, str) or not SPACE_ID.match(space):
+            raise ValueError(f"nombre de espacio inválido: {space!r}")
+        flatten(items, space, out=rows, seen=seen)
+    return rows
+
+
+def flatten(items, space, parent=None, depth=0, out=None, seen=None):
     """Valida el árbol y lo convierte en filas (padres antes que hijos)."""
     out = [] if out is None else out
     seen = set() if seen is None else seen
     if not isinstance(items, list):
-        raise ValueError("'items' debe ser una lista")
+        raise ValueError("cada espacio debe ser una lista de bookmarks")
     if depth > MAX_DEPTH:
         raise ValueError("demasiados niveles de carpetas")
     for position, item in enumerate(items):
@@ -143,10 +171,10 @@ def flatten(items, parent=None, depth=0, out=None, seen=None):
             url = item.get("url")
             if not isinstance(url, str) or len(url) > 4096 or not url.lower().startswith(ALLOWED_URL_PREFIXES):
                 raise ValueError(f"url inválida en {item_id}")
-            out.append((item_id, parent, position, "link", title, url))
+            out.append((item_id, space, parent, position, "link", title, url))
         elif kind == "folder":
-            out.append((item_id, parent, position, "folder", title, None))
-            flatten(item.get("children", []), item_id, depth + 1, out, seen)
+            out.append((item_id, space, parent, position, "folder", title, None))
+            flatten(item.get("children", []), space, item_id, depth + 1, out, seen)
         else:
             raise ValueError(f"tipo inválido en {item_id}")
         if len(out) > MAX_ITEMS:
@@ -156,7 +184,9 @@ def flatten(items, parent=None, depth=0, out=None, seen=None):
 
 def write_state(conn, payload):
     """Guarda el árbol completo. Devuelve la nueva versión, o None si hay conflicto."""
-    rows = flatten(payload.get("items"))
+    if "spaces" not in payload:
+        raise ValueError("Esta pestaña tiene una versión antigua de la página: recárgala")
+    rows = flatten_spaces(payload["spaces"])
     settings = payload.get("settings", {})
     if not isinstance(settings, dict):
         raise ValueError("'settings' debe ser un objeto")

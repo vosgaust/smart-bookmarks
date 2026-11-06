@@ -6,6 +6,14 @@ Página de bookmarks en cuadrícula, con carpetas y arrastrar y soltar. Tus book
 - **Web:** `public/` (HTML, CSS y JS, sin compilar nada).
 - **Base de datos:** `/data/bookmarks.db`, dentro del volumen de Docker `bookmarks-data`.
 
+## Espacios: Personal y Trabajo
+
+- **Bookmarks separados:** cada espacio tiene sus propios bookmarks y carpetas. Se cambia con el selector de arriba a la derecha.
+- **Memoria por dispositivo:** cada dispositivo recuerda el último espacio que usaste.
+- **Color propio:** «Trabajo» tiene un color distinto para que sepas de un vistazo dónde estás.
+- **Mover entre espacios:** arrastra un bookmark encima del otro espacio en el selector.
+- **Abrir directamente un espacio:** usa `http://IP-DEL-MINIPC:5656/#trabajo` o `#personal`. Viene bien para la página de inicio del navegador del trabajo.
+
 ## Arrancar en el minipc
 
 ```bash

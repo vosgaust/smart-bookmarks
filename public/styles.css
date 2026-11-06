@@ -64,7 +64,52 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 
 .top { max-width: 780px; width: 100%; margin: 0 auto 22px; }
 
-.today { margin: 0 0 10px 4px; color: var(--muted); font-size: 13px; }
+/* Cada espacio tiene su color de acento, para saber de un vistazo dónde estás */
+html[data-space="trabajo"] {
+  --accent: #0b7285;
+  --accent-soft: rgb(11 114 133 / 0.14);
+}
+@media (prefers-color-scheme: dark) {
+  html[data-space="trabajo"] {
+    --accent: #3bc9db;
+    --accent-text: #062a30;
+    --accent-soft: rgb(59 201 219 / 0.18);
+  }
+}
+
+.top-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; }
+
+.today { margin: 0 0 0 4px; color: var(--muted); font-size: 13px; }
+
+.spaces {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+}
+.spaces button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, color .15s, box-shadow .15s;
+}
+.spaces button svg { width: 15px; height: 15px; }
+.spaces button:hover { color: var(--text); }
+.spaces button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.spaces button[aria-selected="true"] svg { color: var(--accent); }
+.spaces button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.spaces button.drop-into { background: var(--accent-soft); color: var(--text); box-shadow: inset 0 0 0 2px var(--accent); }
 
 .add-row { display: flex; gap: 10px; }
 
